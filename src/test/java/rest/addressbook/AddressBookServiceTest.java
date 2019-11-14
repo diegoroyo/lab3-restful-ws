@@ -7,6 +7,7 @@ import org.junit.Test;
 
 import java.io.IOException;
 import java.net.URI;
+import java.util.List;
 
 import javax.ws.rs.client.Client;
 import javax.ws.rs.client.ClientBuilder;
@@ -20,6 +21,7 @@ import rest.addressbook.domain.AddressBook;
 import rest.addressbook.domain.Person;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
 
 /**
  * A simple test suite.
@@ -47,13 +49,24 @@ public class AddressBookServiceTest {
 		Response response = client.target("http://localhost:8282/contacts")
 				.request().get();
 		assertEquals(200, response.getStatus());
-		assertEquals(0, response.readEntity(AddressBook.class).getPersonList()
-				.size());
+		AddressBook abResponse = response.readEntity(AddressBook.class);
+		assertEquals(0, abResponse.getPersonList().size());
 
 		//////////////////////////////////////////////////////////////////////
 		// Verify that GET /contacts is well implemented by the service, i.e
 		// complete the test to ensure that it is safe and idempotent
 		//////////////////////////////////////////////////////////////////////
+
+		// Should return a valid AddressBook on response
+		assertEquals(ab, abResponse);
+		assertEquals(0, ab.getPersonList().size());
+		
+		// Check idempotency: new petition should return same address book
+		response = client.target("http://localhost:8282/contacts").request().get();
+		assertEquals(200, response.getStatus());
+		AddressBook abResponse2 = response.readEntity(AddressBook.class);
+		assertEquals(ab, abResponse2);
+		assertEquals(0, ab.getPersonList().size());
 	}
 
 	@Test
@@ -95,7 +108,15 @@ public class AddressBookServiceTest {
 		// Verify that POST /contacts is well implemented by the service, i.e
 		// complete the test to ensure that it is not safe and not idempotent
 		//////////////////////////////////////////////////////////////////////	
-				
+
+		// Check that second POST request makes additional changes
+		AddressBook abOld = new AddressBook(ab);
+		response = client.target("http://localhost:8282/contacts")
+				.request(MediaType.APPLICATION_JSON)
+				.post(Entity.entity(juan, MediaType.APPLICATION_JSON));
+		assertEquals(201, response.getStatus());
+		assertNotEquals(abOld, response.readEntity(AddressBook.class));
+		assertNotEquals(abOld, ab);
 	}
 
 	@Test
@@ -150,7 +171,20 @@ public class AddressBookServiceTest {
 		// Verify that GET /contacts/person/3 is well implemented by the service, i.e
 		// complete the test to ensure that it is safe and idempotent
 		//////////////////////////////////////////////////////////////////////	
-	
+
+		// Clone address book
+		AddressBook abOld = new AddressBook(ab);
+
+		// Additional petitions to /contacts/person/3 should return the same Person
+		response = client.target("http://localhost:8282/contacts/person/3")
+				.request(MediaType.APPLICATION_JSON).get();
+		assertEquals(200, response.getStatus());
+		assertEquals(MediaType.APPLICATION_JSON_TYPE, response.getMediaType());
+		Person mariaUpdated2 = response.readEntity(Person.class);
+		assertEquals(mariaUpdated2, mariaUpdated);
+
+		// Address book should not have been modified
+		assertEquals(ab, abOld);
 	}
 
 	@Test
@@ -183,6 +217,19 @@ public class AddressBookServiceTest {
 		// complete the test to ensure that it is safe and idempotent
 		//////////////////////////////////////////////////////////////////////	
 	
+		// Clone address book state
+		AddressBook abOld = new AddressBook(ab);
+		assertEquals(abOld, addressBookRetrieved);
+
+		// New petitions should return same address book
+		response = client.target("http://localhost:8282/contacts")
+				.request(MediaType.APPLICATION_JSON).get();
+		assertEquals(200, response.getStatus());
+		assertEquals(MediaType.APPLICATION_JSON_TYPE, response.getMediaType());
+		AddressBook addressBookRetrieved2 = response
+				.readEntity(AddressBook.class);
+		assertEquals(abOld, addressBookRetrieved2);
+		assertEquals(abOld, ab);
 	}
 
 	@Test
@@ -199,6 +246,9 @@ public class AddressBookServiceTest {
 		ab.getPersonList().add(salvador);
 		ab.getPersonList().add(juan);
 		launchServer(ab);
+
+		// Clone Address Book
+		AddressBook abStart = new AddressBook(ab);
 
 		// Update Maria
 		Person maria = new Person();
@@ -235,7 +285,33 @@ public class AddressBookServiceTest {
 		// Verify that PUT /contacts/person/2 is well implemented by the service, i.e
 		// complete the test to ensure that it is idempotent but not safe
 		//////////////////////////////////////////////////////////////////////	
-	
+
+		// Check that address book has changed (PUT changes state)
+		assertNotEquals(ab, abStart);
+		assertEquals(ab.getPersonList().get(1), mariaRetrieved);
+
+		// Clone address book again
+		AddressBook abOld = new AddressBook(ab);
+
+		// Idempotency: the same petition should not alter Maria's state
+		response = client
+				.target("http://localhost:8282/contacts/person/2")
+				.request(MediaType.APPLICATION_JSON)
+				.put(Entity.entity(maria, MediaType.APPLICATION_JSON));
+		assertEquals(200, response.getStatus());
+		assertEquals(MediaType.APPLICATION_JSON_TYPE, response.getMediaType());
+		Person mariaRetrieved2 = response.readEntity(Person.class);
+		assertEquals(mariaRetrieved2, mariaRetrieved);
+		assertEquals(ab.getPersonList().get(1), mariaRetrieved);
+
+		// It shouldn't alter the Address Book either
+		response = client.target("http://localhost:8282/contacts")
+				.request(MediaType.APPLICATION_JSON).get();
+		assertEquals(200, response.getStatus());
+		assertEquals(MediaType.APPLICATION_JSON_TYPE, response.getMediaType());
+		AddressBook addressBookRetrieved = response
+				.readEntity(AddressBook.class);
+		assertEquals(abOld, addressBookRetrieved);
 	}
 
 	@Test
@@ -251,6 +327,9 @@ public class AddressBookServiceTest {
 		ab.getPersonList().add(salvador);
 		ab.getPersonList().add(juan);
 		launchServer(ab);
+
+		// Clone Address Book
+		AddressBook abStart = new AddressBook(ab);		
 
 		// Delete a user
 		Client client = ClientBuilder.newClient();
@@ -269,6 +348,27 @@ public class AddressBookServiceTest {
 		// complete the test to ensure that it is idempotent but not safe
 		//////////////////////////////////////////////////////////////////////	
 
+		// Check that address book has changed (DELETE changes state)
+		assertEquals(ab.getPersonList().contains(juan), false);
+		assertNotEquals(ab, abStart);
+		
+		// Clone address book again
+		AddressBook abOld = new AddressBook(ab);
+
+		// Idempotency: the same petition shouldn't alter the AB's state
+		response = client
+				.target("http://localhost:8282/contacts/person/2").request()
+				.delete();
+		assertEquals(404, response.getStatus());
+
+		// Check that Address Book's state hasn't been changed
+		response = client.target("http://localhost:8282/contacts")
+				.request(MediaType.APPLICATION_JSON).get();
+		assertEquals(200, response.getStatus());
+		assertEquals(MediaType.APPLICATION_JSON_TYPE, response.getMediaType());
+		AddressBook addressBookRetrieved = response
+				.readEntity(AddressBook.class);
+		assertEquals(abOld, addressBookRetrieved);
 	}
 
 	@Test
