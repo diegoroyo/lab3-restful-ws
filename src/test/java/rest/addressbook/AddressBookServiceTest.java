@@ -15,6 +15,7 @@ import javax.ws.rs.client.Entity;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.UriBuilder;
+import javax.ws.rs.core.EntityTag;
 
 import rest.addressbook.config.ApplicationConfig;
 import rest.addressbook.domain.AddressBook;
@@ -411,6 +412,94 @@ public class AddressBookServiceTest {
 		response = client.target("http://localhost:8282/contacts/person/3")
 				.request(MediaType.APPLICATION_JSON).get();
 		assertEquals(404, response.getStatus());
+	}
+
+	@Test
+	public void conditionalGet() throws IOException {
+		// Prepare server
+		AddressBook ab = new AddressBook();
+		Person salvador = new Person();
+		salvador.setName("Salvador");
+		salvador.setId(1);
+		ab.getPersonList().add(salvador);
+		launchServer(ab);
+
+		// Get ETag from first user
+		Client client = ClientBuilder.newClient();
+		Response response = client
+				.target("http://localhost:8282/contacts/person/1")
+				.request(MediaType.APPLICATION_JSON).get();
+		assertEquals(200, response.getStatus());
+		assertEquals(MediaType.APPLICATION_JSON_TYPE, response.getMediaType());
+		EntityTag etag = response.getEntityTag();
+
+		// Check that valid ETag returns 304 code
+		response = client
+				.target("http://localhost:8282/contacts/person/1")
+				.request(MediaType.APPLICATION_JSON)
+				.header("If-None-Match", etag).get();
+		assertEquals(304, response.getStatus());
+
+		// Modify user 1 and with that his ETag
+		salvador.setName("Juan");		
+		response = client
+				.target("http://localhost:8282/contacts/person/1")
+				.request(MediaType.APPLICATION_JSON)
+				.put(Entity.entity(salvador, MediaType.APPLICATION_JSON));
+		
+		// Try the same petition again and check that the user gets updated content
+		response = client
+				.target("http://localhost:8282/contacts/person/1")
+				.request(MediaType.APPLICATION_JSON)
+				.header("If-None-Match", etag).get();
+		assertEquals(200, response.getStatus());
+	}
+
+	@Test
+	public void conditionalPut() throws IOException {
+		// Prepare server
+		AddressBook ab = new AddressBook();
+		Person salvador = new Person();
+		salvador.setName("Salvador");
+		salvador.setId(1);
+		ab.getPersonList().add(salvador);
+		launchServer(ab);
+
+		// Check that PUT with no Etag returns 200 code and get ETag
+		Client client = ClientBuilder.newClient();
+		Response response = client
+				.target("http://localhost:8282/contacts/person/1")
+				.request(MediaType.APPLICATION_JSON)
+				.put(Entity.entity(salvador, MediaType.APPLICATION_JSON));
+		assertEquals(200, response.getStatus());
+		assertEquals(MediaType.APPLICATION_JSON_TYPE, response.getMediaType());
+		EntityTag etag = response.getEntityTag();
+
+		// Updating it with valid ETag in If-Match header should return a 200 code
+		salvador.setName("Juan");
+		response = client
+				.target("http://localhost:8282/contacts/person/1")
+				.request(MediaType.APPLICATION_JSON)
+				.header("If-Match", etag)
+				.put(Entity.entity(salvador, MediaType.APPLICATION_JSON));
+		assertEquals(200, response.getStatus());
+		EntityTag newEtag = response.getEntityTag();
+
+		// ETag changed from last put, updating it now shouldn't be valid
+		response = client
+				.target("http://localhost:8282/contacts/person/1")
+				.request(MediaType.APPLICATION_JSON)
+				.header("If-Match", etag)
+				.put(Entity.entity(salvador, MediaType.APPLICATION_JSON));
+		assertEquals(412, response.getStatus());
+
+		// Using the updated ETag (valid) and the same user it should return 204 code
+		response = client
+				.target("http://localhost:8282/contacts/person/1")
+				.request(MediaType.APPLICATION_JSON)
+				.header("If-Match", newEtag)
+				.put(Entity.entity(salvador, MediaType.APPLICATION_JSON));
+		assertEquals(204, response.getStatus());	
 	}
 
 	private void launchServer(AddressBook ab) throws IOException {
