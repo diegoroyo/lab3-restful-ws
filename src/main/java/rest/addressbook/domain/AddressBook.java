@@ -11,6 +11,15 @@ public class AddressBook {
   private int nextId = 1;
   private List<Person> personList = new ArrayList<>();
 
+  // Empty constructor
+  public AddressBook() {}
+
+  // Copy constructor
+  public AddressBook(AddressBook copy) {
+    this.nextId = copy.nextId;
+    this.personList = new ArrayList<>(copy.personList);
+  }
+
   /**
    * The value of next unique identifier.
    *
@@ -46,5 +55,21 @@ public class AddressBook {
     int oldValue = nextId;
     nextId++;
     return oldValue;
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    // self check
+    if (this == o)
+        return true;
+    // null check
+    if (o == null)
+        return false;
+    // type check and cast
+    if (getClass() != o.getClass())
+        return false;
+    AddressBook other = (AddressBook) o;
+    return this.nextId == other.nextId &&
+           this.personList.equals(other.personList);
   }
 }
