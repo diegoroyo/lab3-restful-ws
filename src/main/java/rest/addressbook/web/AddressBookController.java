@@ -9,9 +9,13 @@ import javax.ws.rs.PUT;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
+import javax.ws.rs.core.CacheControl;
 import javax.ws.rs.core.Context;
+import javax.ws.rs.core.EntityTag;
 import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Request;
 import javax.ws.rs.core.Response;
+import javax.ws.rs.core.Response.ResponseBuilder;
 import javax.ws.rs.core.Response.Status;
 import javax.ws.rs.core.UriInfo;
 
@@ -30,6 +34,13 @@ public class AddressBookController {
   @Inject
   AddressBook addressBook;
 
+  private CacheControl getCacheControl() {
+    CacheControl cc = new CacheControl();
+    cc.setMaxAge(86400);
+    cc.setPrivate(true);
+    return cc;
+  }
+
   /**
    * A GET /contacts request should return the address book in JSON.
    *
@@ -37,8 +48,14 @@ public class AddressBookController {
    */
   @GET
   @Produces(MediaType.APPLICATION_JSON)
-  public AddressBook getAddressBook() {
-    return addressBook;
+  public Response getAddressBook(@Context Request request) {
+    EntityTag etag = new EntityTag(Integer.toString(addressBook.hashCode()));
+    ResponseBuilder builder = request.evaluatePreconditions(etag);
+    if (builder == null) {
+      return Response.ok(addressBook).cacheControl(getCacheControl()).tag(etag).build();
+    } else {
+      return builder.build();
+    }
   }
 
   /**
@@ -67,10 +84,17 @@ public class AddressBookController {
   @GET
   @Path("/person/{id}")
   @Produces(MediaType.APPLICATION_JSON)
-  public Response getPerson(@PathParam("id") int id) {
+  public Response getPerson(@Context Request request,
+                            @PathParam("id") int id) {
     for (Person p : addressBook.getPersonList()) {
       if (p.getId() == id) {
-        return Response.ok(p).build();
+        EntityTag etag = new EntityTag(Integer.toString(p.hashCode()));
+        ResponseBuilder builder = request.evaluatePreconditions(etag);
+        if (builder == null) {
+          return Response.ok(p).cacheControl(getCacheControl()).tag(etag).build();
+        } else {
+          return builder.build();
+        }
       }
     }
     return Response.status(Status.NOT_FOUND).build();
@@ -87,14 +111,23 @@ public class AddressBookController {
   @PUT
   @Path("/person/{id}")
   @Produces(MediaType.APPLICATION_JSON)
-  public Response updatePerson(@Context UriInfo info,
+  public Response updatePerson(@Context Request request, @Context UriInfo info,
                                @PathParam("id") int id, Person person) {
     for (int i = 0; i < addressBook.getPersonList().size(); i++) {
-      if (addressBook.getPersonList().get(i).getId() == id) {
+      Person p = addressBook.getPersonList().get(i);
+      if (p.getId() == id) {
+        EntityTag etag = new EntityTag(Integer.toString(p.hashCode()));
+        ResponseBuilder builder = request.evaluatePreconditions(etag);
+        System.out.println("etag calculado: " + etag);
+        // client is not up to date (send back 412)
+        if (builder != null) {
+            return builder.build();
+        }
         person.setId(id);
         person.setHref(info.getAbsolutePath());
         addressBook.getPersonList().set(i, person);
-        return Response.ok(person).build();
+        EntityTag newTag = new EntityTag(Integer.toString(person.hashCode()));
+        return Response.ok(person).cacheControl(getCacheControl()).tag(newTag).build();
       }
     }
     return Response.status(Status.BAD_REQUEST).build();
