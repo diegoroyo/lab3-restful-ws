@@ -2,6 +2,7 @@ package rest.addressbook.web;
 
 import javax.inject.Inject;
 import javax.ws.rs.Consumes;
+import javax.ws.rs.HeaderParam;
 import javax.ws.rs.DELETE;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
@@ -111,7 +112,9 @@ public class AddressBookController {
   @PUT
   @Path("/person/{id}")
   @Produces(MediaType.APPLICATION_JSON)
-  public Response updatePerson(@Context Request request, @Context UriInfo info,
+  public Response updatePerson(@Context Request request,
+                               @HeaderParam("If-Match") String ifMatch,
+                               @Context UriInfo info,
                                @PathParam("id") int id, Person person) {
     for (int i = 0; i < addressBook.getPersonList().size(); i++) {
       Person p = addressBook.getPersonList().get(i);
@@ -125,9 +128,15 @@ public class AddressBookController {
         }
         person.setId(id);
         person.setHref(info.getAbsolutePath());
-        addressBook.getPersonList().set(i, person);
-        EntityTag newTag = new EntityTag(Integer.toString(person.hashCode()));
-        return Response.ok(person).cacheControl(getCacheControl()).tag(newTag).build();
+        if (ifMatch != null && p.equals(person)) {
+          // no need to update content, respond with 204
+          return Response.noContent().build();
+        } else {
+          // etag is the same but needs to update
+          addressBook.getPersonList().set(i, person);
+          EntityTag newTag = new EntityTag(Integer.toString(person.hashCode()));
+          return Response.ok(person).cacheControl(getCacheControl()).tag(newTag).build();
+        }
       }
     }
     return Response.status(Status.BAD_REQUEST).build();
